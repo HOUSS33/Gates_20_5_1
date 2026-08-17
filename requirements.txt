@@ -1,0 +1,4 @@
+requests
+websocket-client
+pysocks
+python-socks
