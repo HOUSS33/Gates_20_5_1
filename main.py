@@ -266,7 +266,7 @@ class LiveAbsenceEngine:
 # ==========================================================================
 # 4. CLIENT WEBSOCKET
 # ==========================================================================
-engine = LiveAbsenceEngine(seuil=23)
+engine = LiveAbsenceEngine(seuil=3)
 
 last_game_id = load_last_game_id_from_csv()
 if last_game_id:
