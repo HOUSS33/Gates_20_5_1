@@ -141,7 +141,7 @@ def get_column(n):
 
 
 class LiveAbsenceEngine:
-    def __init__(self, seuil=23):
+    def __init__(self, seuil=20):
         self.fib = [55, 55, 110, 165, 275]
         self.capital_requis = sum(self.fib)  # 660
         self.seuil = seuil
