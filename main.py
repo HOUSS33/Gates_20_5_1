@@ -157,6 +157,11 @@ def get_column(n):
 
 
 class LiveAbsenceEngine:
+    # 🔧 Valeur sentinelle : "aucun bust récent connu" (silence Telegram).
+    # Doit rester strictement > 2 pour ne jamais satisfaire
+    # (signals_since_bust + 1) <= 2.
+    SILENT_SENTINEL = 999
+
     def __init__(self, seuil=6):
         self.fib = [55, 55, 110, 165, 275]
         self.capital_requis = sum(self.fib)  # 660
@@ -183,11 +188,15 @@ class LiveAbsenceEngine:
         self.signal_counter = 0
 
         # 🔧 PROBLEME 2 : Filtrage Telegram — seuls les 2 premiers signaux
-        # après chaque bust sont notifiés. Le compteur repart à 0 à chaque
-        # bust. Sans persistance, un redémarrage le remettrait aussi à 0,
-        # faisant croire à tort qu'un bust vient d'avoir lieu.
-        self.signals_since_bust = 0
-        self.notify_current_signal = True
+        # après chaque bust sont notifiés. Le compteur repart à 0 À CHAQUE
+        # BUST RÉEL (voir plus bas). Il démarre ici à une valeur haute
+        # (SILENT_SENTINEL, > 2) plutôt qu'à 0 : sinon, un démarrage à froid
+        # (jamais eu de bust) ou un redémarrage sans état sauvegardé serait
+        # confondu avec "un bust vient tout juste d'avoir lieu", et le bot
+        # notifierait à tort ses 2 premiers signaux alors qu'aucun bust
+        # n'a jamais eu lieu.
+        self.signals_since_bust = self.SILENT_SENTINEL
+        self.notify_current_signal = False
 
     # ----------------------------------------------------------------
     # 🔧 PERSISTANCE : sérialise/désérialise tout l'état nécessaire pour
@@ -220,7 +229,9 @@ class LiveAbsenceEngine:
         self.fib_index = data.get("fib_index", self.fib_index)
         self.current_sequence_loss = data.get("current_sequence_loss", self.current_sequence_loss)
         self.signal_counter = data.get("signal_counter", self.signal_counter)
-        self.signals_since_bust = data.get("signals_since_bust", self.signals_since_bust)
+        # 🔧 Si la clé est absente d'un ancien fichier d'état, retombe sur
+        # SILENT_SENTINEL (silence), jamais sur 0 (qui notifierait à tort).
+        self.signals_since_bust = data.get("signals_since_bust", self.SILENT_SENTINEL)
 
         saved_absence = data.get("absence")
         if saved_absence:
