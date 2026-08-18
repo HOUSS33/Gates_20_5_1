@@ -11,24 +11,19 @@ BOT DE SIGNAL LIVE : WEBSOCKET (Pragmatic Play) -> MACHINE A ETATS -> TELEGRAM
    - La cible NE CHANGE JAMAIS pendant un signal
    - PAYOUT 2:1 (dizaine/colonne, pas 1:1 comme pair/impair)
 
-🔧 FILTRAGE TELEGRAM : seuls les 2 premiers signaux après chaque bust sont
-   notifiés sur Telegram. Le bot continue de tout traiter/parier normalement
-   en interne (CSV, console) — il devient juste silencieux côté Telegram à
-   partir du 3ème signal, jusqu'au prochain bust qui relance le compteur.
+🔧 TELEGRAM : tous les événements (alertes précoces, signaux, gains, pertes,
+   busts) sont notifiés sans filtrage.
 
-🔧 PERSISTANCE D'ÉTAT (corrige 2 problèmes) :
+🔧 PERSISTANCE D'ÉTAT (corrige 1 problème) :
    1. Compteurs d'absence (self.absence) — chaque catégorie (dozen 1/2/3,
       column 1/2/3) a son propre compteur de spins consécutifs sans
       apparaître. Sans persistance, un redémarrage remettrait tout à 0 et
       ferait perdre la progression déjà accumulée (ex: dozen 2 absent
       depuis 14/20 spins → reperdu, il faudrait recompter depuis 0).
-   2. Tracker de bust (signals_since_bust) — sans persistance, un
-      redémarrage ferait croire au bot qu'un bust vient d'avoir lieu et
-      rouvrirait à tort la fenêtre de notification des 2 prochains signaux.
-   -> Les deux sont donc sauvegardés dans un fichier JSON sur le même
-   Volume Railway que le CSV, après CHAQUE spin traité, et rechargés au
-   démarrage s'ils existent. Sans Volume attaché (VOLUME_PATH="."), l'état
-   reste éphémère comme le CSV — voir l'avertissement affiché au démarrage.
+   -> Sauvegardé dans un fichier JSON sur le même Volume Railway que le
+   CSV, après CHAQUE spin traité, et rechargé au démarrage s'il existe.
+   Sans Volume attaché (VOLUME_PATH="."), l'état reste éphémère comme le
+   CSV — voir l'avertissement affiché au démarrage.
 ========================================================================================
 """
 
@@ -157,11 +152,6 @@ def get_column(n):
 
 
 class LiveAbsenceEngine:
-    # 🔧 Valeur sentinelle : "aucun bust récent connu" (silence Telegram).
-    # Doit rester strictement > 2 pour ne jamais satisfaire
-    # (signals_since_bust + 1) <= 2.
-    SILENT_SENTINEL = 999
-
     def __init__(self, seuil=6):
         self.fib = [55, 55, 110, 165, 275]
         self.capital_requis = sum(self.fib)  # 660
@@ -177,26 +167,15 @@ class LiveAbsenceEngine:
         self.fib_index = 0
         self.current_sequence_loss = 0
 
-        # 🔧 PROBLEME 1 : Compteurs d'absence pour les 6 catégories, mis à
-        # jour à CHAQUE spin. Sans persistance, ils repartent tous à 0 à
-        # chaque redémarrage — voir to_dict()/load_dict() plus bas.
+        # 🔧 Compteurs d'absence pour les 6 catégories, mis à jour à
+        # CHAQUE spin. Sans persistance, ils repartent tous à 0 à chaque
+        # redémarrage — voir to_dict()/load_dict() plus bas.
         self.absence = {
             ('dozen', 1): 0, ('dozen', 2): 0, ('dozen', 3): 0,
             ('column', 1): 0, ('column', 2): 0, ('column', 3): 0,
         }
 
         self.signal_counter = 0
-
-        # 🔧 PROBLEME 2 : Filtrage Telegram — seuls les 2 premiers signaux
-        # après chaque bust sont notifiés. Le compteur repart à 0 À CHAQUE
-        # BUST RÉEL (voir plus bas). Il démarre ici à une valeur haute
-        # (SILENT_SENTINEL, > 2) plutôt qu'à 0 : sinon, un démarrage à froid
-        # (jamais eu de bust) ou un redémarrage sans état sauvegardé serait
-        # confondu avec "un bust vient tout juste d'avoir lieu", et le bot
-        # notifierait à tort ses 2 premiers signaux alors qu'aucun bust
-        # n'a jamais eu lieu.
-        self.signals_since_bust = self.SILENT_SENTINEL
-        self.notify_current_signal = False
 
     # ----------------------------------------------------------------
     # 🔧 PERSISTANCE : sérialise/désérialise tout l'état nécessaire pour
@@ -215,7 +194,6 @@ class LiveAbsenceEngine:
             "current_sequence_loss": self.current_sequence_loss,
             "absence": {f"{k[0]}_{k[1]}": v for k, v in self.absence.items()},
             "signal_counter": self.signal_counter,
-            "signals_since_bust": self.signals_since_bust,
         }
 
     def load_dict(self, data):
@@ -229,9 +207,6 @@ class LiveAbsenceEngine:
         self.fib_index = data.get("fib_index", self.fib_index)
         self.current_sequence_loss = data.get("current_sequence_loss", self.current_sequence_loss)
         self.signal_counter = data.get("signal_counter", self.signal_counter)
-        # 🔧 Si la clé est absente d'un ancien fichier d'état, retombe sur
-        # SILENT_SENTINEL (silence), jamais sur 0 (qui notifierait à tort).
-        self.signals_since_bust = data.get("signals_since_bust", self.SILENT_SENTINEL)
 
         saved_absence = data.get("absence")
         if saved_absence:
@@ -258,14 +233,13 @@ class LiveAbsenceEngine:
                 engine.load_dict(data)
                 print(f"[State] ✅ État restauré depuis {path} "
                       f"(signal_counter={engine.signal_counter}, "
-                      f"signals_since_bust={engine.signals_since_bust}, "
                       f"is_betting={engine.is_betting}, "
                       f"absence={engine.absence})")
             except Exception as e:
                 print(f"[State] ⚠️ Impossible de charger l'état existant ({e}) — redémarrage à froid.")
         else:
             print("[State] Aucun état sauvegardé trouvé — démarrage à froid "
-                  "(absence à 0 pour toutes les catégories, signals_since_bust=0).")
+                  "(absence à 0 pour toutes les catégories).")
         return engine
 
     def process_spin(self, number):
@@ -279,11 +253,6 @@ class LiveAbsenceEngine:
             self.absence[('column', val)] = 0 if c_col == val else self.absence[('column', val)] + 1
 
         if not self.is_betting:
-            # 🔧 Alerte précoce (seuil-1), respecte le même filtrage que le
-            # signal réel qui la suivra (prédictif, calculé avant l'ouverture).
-            will_be_notified = (self.signals_since_bust + 1) <= 2
-            self.notify_current_signal = will_be_notified
-
             for (cat_type, val), count in self.absence.items():
                 if count == self.seuil - 1:
                     events.append(
@@ -304,9 +273,6 @@ class LiveAbsenceEngine:
                 self.fib_index = 0
                 self.current_sequence_loss = 0
                 self.signal_counter += 1
-
-                self.signals_since_bust += 1
-                self.notify_current_signal = self.signals_since_bust <= 2
 
                 events.append(
                     f"⚡ <b>SIGNAL #{self.signal_counter}</b> — {self.target_type.upper()} {self.target_value} "
@@ -354,7 +320,6 @@ class LiveAbsenceEngine:
                 else:
                     events.append(f"🚨 Fin de séquence — capital auto-suffisant ({solde_restant} DHS).")
 
-                self.signals_since_bust = 0  # 🔧 relance le compteur pour les 2 prochains signaux
                 self.is_betting = False
                 self.fib_index = 0
                 self.current_sequence_loss = 0
@@ -377,12 +342,10 @@ def handle_new_result(number, table_id):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Nouveau spin (table {table_id}) : {number}")
     events = engine.process_spin(number)
     for msg in events:
-        if engine.notify_current_signal:
-            send_telegram_alert(msg)
+        send_telegram_alert(msg)
         print(msg)
     # 🔧 Sauvegarde après CHAQUE spin traité (pas seulement en cas d'événement),
-    # pour que absence/signals_since_bust restent exacts même si le bot
-    # redémarre entre deux signaux.
+    # pour que absence reste exact même si le bot redémarre entre deux signaux.
     engine.save_state(STATE_FILE)
 
 
@@ -501,7 +464,7 @@ if __name__ == "__main__":
         print(f"⚠️ ATTENTION : RAILWAY_VOLUME_MOUNT_PATH non détecté — CSV ET ÉTAT éphémères : "
               f"{os.path.abspath(CSV_FILE)} / {os.path.abspath(STATE_FILE)}. "
               f"Sans Volume Railway attaché, un redémarrage effacera tout (CSV + état du moteur, "
-              f"y compris les compteurs d'absence et le tracker de bust).")
+              f"y compris les compteurs d'absence).")
     else:
         print(f"✅ Volume détecté ({VOLUME_PATH}) — CSV ET ÉTAT persistants : {CSV_FILE} / {STATE_FILE}")
     print(f"🎲 Bot démarré | Échelle (5 vies) : {engine.fib} | Capital requis : {engine.capital_requis} DHS")
