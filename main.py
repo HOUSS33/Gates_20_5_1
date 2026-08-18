@@ -5,16 +5,14 @@ BOT DE SIGNAL LIVE : WEBSOCKET (Pragmatic Play) -> MACHINE A ETATS -> TELEGRAM
 🔧 STRATÉGIE "RETOUR APRÈS ABSENCE" : DIZAINES / COLONNES
    - Parie qu'une dizaine/colonne PRÉCISE va enfin réapparaître après avoir
      été absente pendant SEUIL spins d'affilée.
-   - Seuil de déclenchement : 23 spins d'absence
+   - Seuil de déclenchement : 20 spins d'absence
    - Échelle de mise : 5 vies [55, 55, 110, 165, 275] (660 DHS requis)
    - Une seule séquence par signal (target_wins=1)
    - La cible NE CHANGE JAMAIS pendant un signal
    - PAYOUT 2:1 (dizaine/colonne, pas 1:1 comme pair/impair)
 
-🔧 FILTRAGE TELEGRAM : seuls les 2 premiers signaux après chaque bust sont
-   notifiés sur Telegram. Le bot continue de tout traiter/parier normalement
-   en interne (CSV, console) — il devient juste silencieux côté Telegram à
-   partir du 3ème signal, jusqu'au prochain bust qui relance le compteur.
+🔧 TELEGRAM : aucun filtre — tous les événements (alertes précoces, signaux,
+   gains, pertes, busts) sont relayés vers Telegram, sans exception.
 ========================================================================================
 """
 
@@ -141,7 +139,7 @@ def get_column(n):
 
 
 class LiveAbsenceEngine:
-    def __init__(self, seuil=20):
+    def __init__(self, seuil=6):
         self.fib = [55, 55, 110, 165, 275]
         self.capital_requis = sum(self.fib)  # 660
         self.seuil = seuil
@@ -164,11 +162,6 @@ class LiveAbsenceEngine:
 
         self.signal_counter = 0
 
-        # 🔧 Filtrage Telegram : seuls les 2 premiers signaux après chaque
-        # bust sont notifiés. Le compteur repart à 0 à chaque bust.
-        self.signals_since_bust = 0
-        self.notify_current_signal = True
-
     def process_spin(self, number):
         events = []
         c_doz = get_dozen(number)
@@ -180,11 +173,6 @@ class LiveAbsenceEngine:
             self.absence[('column', val)] = 0 if c_col == val else self.absence[('column', val)] + 1
 
         if not self.is_betting:
-            # 🔧 Alerte précoce (seuil-1), respecte le même filtrage que le
-            # signal réel qui la suivra (prédictif, calculé avant l'ouverture).
-            will_be_notified = (self.signals_since_bust + 1) <= 2
-            self.notify_current_signal = will_be_notified
-
             for (cat_type, val), count in self.absence.items():
                 if count == self.seuil - 1:
                     events.append(
@@ -205,9 +193,6 @@ class LiveAbsenceEngine:
                 self.fib_index = 0
                 self.current_sequence_loss = 0
                 self.signal_counter += 1
-
-                self.signals_since_bust += 1
-                self.notify_current_signal = self.signals_since_bust <= 2
 
                 events.append(
                     f"⚡ <b>SIGNAL #{self.signal_counter}</b> — {self.target_type.upper()} {self.target_value} "
@@ -255,7 +240,6 @@ class LiveAbsenceEngine:
                 else:
                     events.append(f"🚨 Fin de séquence — capital auto-suffisant ({solde_restant} DHS).")
 
-                self.signals_since_bust = 0  # 🔧 relance le compteur pour les 2 prochains signaux
                 self.is_betting = False
                 self.fib_index = 0
                 self.current_sequence_loss = 0
@@ -266,7 +250,7 @@ class LiveAbsenceEngine:
 # ==========================================================================
 # 4. CLIENT WEBSOCKET
 # ==========================================================================
-engine = LiveAbsenceEngine(seuil=20)
+engine = LiveAbsenceEngine(seuil=6)
 
 last_game_id = load_last_game_id_from_csv()
 if last_game_id:
@@ -277,8 +261,7 @@ def handle_new_result(number, table_id):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Nouveau spin (table {table_id}) : {number}")
     events = engine.process_spin(number)
     for msg in events:
-        if engine.notify_current_signal:
-            send_telegram_alert(msg)
+        send_telegram_alert(msg)
         print(msg)
 
 
