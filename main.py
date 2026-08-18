@@ -330,7 +330,7 @@ class LiveAbsenceEngine:
 # ==========================================================================
 # 4. CLIENT WEBSOCKET
 # ==========================================================================
-SEUIL_ABSENCE = 6
+SEUIL_ABSENCE = 20
 engine = LiveAbsenceEngine.load_from_file(STATE_FILE, default_seuil=SEUIL_ABSENCE)
 
 last_game_id = load_last_game_id_from_csv()
