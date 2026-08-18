@@ -141,7 +141,7 @@ def get_column(n):
 
 
 class LiveAbsenceEngine:
-    def __init__(self, seuil=6):
+    def __init__(self, seuil=20):
         self.fib = [55, 55, 110, 165, 275]
         self.capital_requis = sum(self.fib)  # 660
         self.seuil = seuil
@@ -266,7 +266,7 @@ class LiveAbsenceEngine:
 # ==========================================================================
 # 4. CLIENT WEBSOCKET
 # ==========================================================================
-engine = LiveAbsenceEngine(seuil=6)
+engine = LiveAbsenceEngine(seuil=20)
 
 last_game_id = load_last_game_id_from_csv()
 if last_game_id:
